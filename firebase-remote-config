@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+# Copyright 2018 The Hyve, Google
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+import requests
+import io
+import sys
+import os
+import json
+
+from oauth2client.service_account import ServiceAccountCredentials
+
+
+def _get_project_id(account_filename):
+  with open(account_filename) as f:
+    return json.load(f)['project_id']
+
+
+def _get_project_url(project_id):
+  return 'https://firebaseremoteconfig.googleapis.com/v1/projects/' + project_id + '/remoteConfig'
+
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
+# [START retrieve_access_token]
+def _get_access_token(account_filename):
+  """Retrieve a valid access token that can be used to authorize requests.
+  :return: Access token.
+  """
+  credentials = ServiceAccountCredentials.from_json_keyfile_name(
+      account_filename, ['https://www.googleapis.com/auth/firebase.remoteconfig'])
+  access_token_info = credentials.get_access_token()
+  return access_token_info.access_token
+# [END retrieve_access_token]
+
+def _get(args):
+  """Retrieve the current Firebase Remote Config template from server.
+  Retrieve the current Firebase Remote Config template from server and store it
+  locally.
+  """
+  if os.path.isfile(args.file) and not query_yes_no('Output file {} already exists. Overwrite?'.format(args.file)):
+    sys.exit(1)
+
+  headers = {
+    'Authorization': 'Bearer ' + _get_access_token(args.account)
+  }
+  project_id = _get_project_id(args.account)
+  resp = requests.get(_get_project_url(project_id), headers=headers)
+
+  if resp.status_code == 200:
+    with io.open(args.file, 'wb') as f:
+      f.write(resp.text.encode('utf-8'))
+
+    print('Retrieved template {} from project {}'.format(args.file, project_id))
+    print('ETag from server: {}'.format(resp.headers['ETag']))
+  else:
+    print('Unable to get template')
+    print(resp.text)
+
+
+def _publish(args):
+  """Publish local template to Firebase server.
+  Args:
+    etag: ETag for safe (avoid race conditions) template updates.
+        * can be used to force template replacement.
+  """
+  with open(args.file, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+  url, access_token = _get_access_token(args.account)
+  headers = {
+    'Authorization': 'Bearer ' + access_token,
+    'Content-Type': 'application/json; UTF-8',
+    'If-Match': args.etag,
+  }
+  resp = requests.put(url, data=content.encode('utf-8'), headers=headers)
+  if resp.status_code == 200:
+    print('Template {} has been published to project {}'.format(args.file, project_id))
+    print('ETag from server: {}'.format(resp.headers['ETag']))
+  else:
+    print('Unable to publish template.')
+    print(resp.text)
+
+
+def main():
+  parser = argparse.ArgumentParser(description='Firebase Remote Config tool')
+  subparsers = parser.add_subparsers(title='Actions', description='Firebase Remote Config actions', help='actions')
+  get_parser = subparsers.add_parser('get')
+  get_parser.set_defaults(func=_get)
+  get_parser.add_argument('-s', '--service-account', dest='account', help='Service account config file', default='service-account.json')
+  get_parser.add_argument('-f', '--file', help='File name to save config to', default='config.json')
+  publish_parser = subparsers.add_parser('publish')
+  publish_parser.add_argument('-s', '--service-account', dest='account', help='Service account config file', default='service-account.json')
+  publish_parser.add_argument('-f', '--file', help='File name to save config to', default='config.json')
+  publish_parser.add_argument('etag', help='ETag of the previously retrieved config.')
+  publish_parser.set_defaults(func=_publish)
+  args = parser.parse_args()
+  args.func(args)
+
+if __name__ == '__main__':
+  main()
