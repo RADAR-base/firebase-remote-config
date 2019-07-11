@@ -108,7 +108,9 @@ def _publish(args):
   with open(args.file, 'r', encoding='utf-8') as f:
     content = f.read()
 
-  url, access_token = _get_access_token(args.account)
+  access_token = _get_access_token(args.account)
+  project_id = _get_project_id(args.account)
+  url = _get_project_url(project_id)
   headers = {
     'Authorization': 'Bearer ' + access_token,
     'Content-Type': 'application/json; UTF-8',
