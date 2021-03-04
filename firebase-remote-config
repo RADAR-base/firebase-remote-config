@@ -108,13 +108,13 @@ def _publish(args):
   with open(args.file, 'r', encoding='utf-8') as f:
     content = f.read()
 
-  url, access_token = _get_access_token(args.account)
   headers = {
-    'Authorization': 'Bearer ' + access_token,
+    'Authorization': 'Bearer ' + _get_access_token(args.account),
     'Content-Type': 'application/json; UTF-8',
     'If-Match': args.etag,
   }
-  resp = requests.put(url, data=content.encode('utf-8'), headers=headers)
+  project_id = _get_project_id(args.account)
+  resp = requests.put(_get_project_url(project_id), data=content.encode('utf-8'), headers=headers)
   if resp.status_code == 200:
     print('Template {} has been published to project {}'.format(args.file, project_id))
     print('ETag from server: {}'.format(resp.headers['ETag']))
